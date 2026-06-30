@@ -72,16 +72,28 @@ class MainActivity : ComponentActivity() {
             // 3. Create Study Plan Screen
             composable("create_plan") {
                 val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+                val isAnalyzingCargos by viewModel.isAnalyzingCargos.collectAsStateWithLifecycle()
+                val suggestedCargos by viewModel.suggestedCargos.collectAsStateWithLifecycle()
                 val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
 
                 CreatePlanScreen(
                     isLoading = isLoading,
+                    isAnalyzingCargos = isAnalyzingCargos,
+                    suggestedCargos = suggestedCargos,
                     errorMessage = errorMessage,
-                    onBack = { navController.popBackStack() },
+                    onBack = {
+                        viewModel.clearSuggestedCargos()
+                        navController.popBackStack()
+                    },
                     onClearError = { viewModel.clearError() },
-                    onSubmit = { rawInput, targetExam, examDate ->
-                        viewModel.createStudyPlanFromInput(rawInput, targetExam, examDate) { planId ->
+                    onClearCargos = { viewModel.clearSuggestedCargos() },
+                    onAnalyzeContest = { targetExam, sourceInput, sourceType, pdfUri, pdfName, onCargosFound ->
+                        viewModel.analyzeContestToFindCargos(targetExam, sourceInput, sourceType, pdfUri, pdfName, onCargosFound)
+                    },
+                    onSubmitPlan = { targetExam, cargo, examDate, sourceInput, sourceType, pdfName ->
+                        viewModel.createStudyPlanForCargo(targetExam, cargo, examDate, sourceInput, sourceType, pdfName) { planId ->
                             viewModel.selectStudyPlan(planId)
+                            viewModel.clearSuggestedCargos()
                             navController.navigate("plan_detail/$planId") {
                                 popUpTo("home")
                             }
