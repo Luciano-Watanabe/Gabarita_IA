@@ -5,7 +5,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.BuildConfig
+import com.example.data.TokenManager
 import com.example.data.api.Content
 import com.example.data.api.GeminiRequest
 import com.example.data.api.Part
@@ -27,10 +27,12 @@ import org.json.JSONObject
 class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: StudyRepository
+    val tokenManager: TokenManager
 
     init {
         val database = AppDatabase.getDatabase(application)
         repository = StudyRepository(database.studyDao())
+        tokenManager = TokenManager(application)
         
         // Inicializa o PDFBoxResourceLoader em segundo plano para aquecer a biblioteca de fontes
         viewModelScope.launch(Dispatchers.IO) {
@@ -386,9 +388,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             _isAnalyzingCargos.value = true
             _errorMessage.value = null
             try {
-                val apiKey = BuildConfig.GEMINI_API_KEY
-                if (apiKey == "MY_GEMINI_API_KEY" || apiKey.isEmpty()) {
-                    throw IllegalStateException("API Key do Gemini não está configurada! Por favor, configure-a no painel Secrets.")
+                val apiKey = tokenManager.getToken()
+                if (apiKey.isNullOrEmpty()) {
+                    throw IllegalStateException("API Key do Gemini não configurada! Por favor, insira-a na tela inicial ou nas configurações.")
                 }
 
                 // Extract text programmatically from the PDF, Webpage, or Text
@@ -482,9 +484,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             _isLoading.value = true
             _errorMessage.value = null
             try {
-                val apiKey = BuildConfig.GEMINI_API_KEY
-                if (apiKey == "MY_GEMINI_API_KEY" || apiKey.isEmpty()) {
-                    throw IllegalStateException("API Key do Gemini não está configurada! Por favor, configure-a no painel Secrets.")
+                val apiKey = tokenManager.getToken()
+                if (apiKey.isNullOrEmpty()) {
+                    throw IllegalStateException("API Key do Gemini não configurada! Por favor, insira-a na tela inicial ou nas configurações.")
                 }
 
                 val fullSyllabus = _extractedSyllabusText.value
@@ -584,9 +586,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             _isLoading.value = true
             _errorMessage.value = null
             try {
-                val apiKey = BuildConfig.GEMINI_API_KEY
-                if (apiKey == "MY_GEMINI_API_KEY" || apiKey.isEmpty()) {
-                    throw IllegalStateException("API Key do Gemini não está configurada! Por favor, configure-a no painel Secrets.")
+                val apiKey = tokenManager.getToken()
+                if (apiKey.isNullOrEmpty()) {
+                    throw IllegalStateException("API Key do Gemini não configurada! Por favor, insira-a na tela inicial ou nas configurações.")
                 }
 
                 val response = generateContentWithRetry(
@@ -685,7 +687,10 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
                 val topicsSummary = topics.joinToString("\n") { "- ${it.name} (Prioridade: ${it.priority})" }
 
-                val apiKey = BuildConfig.GEMINI_API_KEY
+                val apiKey = tokenManager.getToken()
+                if (apiKey.isNullOrEmpty()) {
+                    throw IllegalStateException("API Key do Gemini não configurada! Por favor, insira-a nas configurações.")
+                }
 
                 val response = generateContentWithRetry(
                     apiKey = apiKey,

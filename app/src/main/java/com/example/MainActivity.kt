@@ -30,14 +30,17 @@ class MainActivity : ComponentActivity() {
         val viewModel: StudyViewModel = viewModel()
         val navController = rememberNavController()
 
+        val startDest = if (viewModel.tokenManager.hasToken()) "home" else "onboarding"
+
         NavHost(
             navController = navController,
-            startDestination = "onboarding"
+            startDestination = startDest
         ) {
             // 1. Onboarding Screen
             composable("onboarding") {
                 OnboardingScreen(
-                    onNavigateToHome = {
+                    onNavigateToHome = { token ->
+                        viewModel.tokenManager.saveToken(token)
                         navController.navigate("home") {
                             popUpTo("onboarding") { inclusive = true }
                         }
@@ -55,6 +58,8 @@ class MainActivity : ComponentActivity() {
                     studyPlans = studyPlans,
                     mockExams = mockExams,
                     streak = streak,
+                    currentToken = viewModel.tokenManager.getToken(),
+                    onSaveToken = { token -> viewModel.tokenManager.saveToken(token) },
                     onNavigateToCreatePlan = { navController.navigate("create_plan") },
                     onNavigateToPlanDetail = { planId ->
                         viewModel.selectStudyPlan(planId)

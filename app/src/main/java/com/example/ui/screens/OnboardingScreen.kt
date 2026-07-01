@@ -31,12 +31,18 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.theme.LightAccent
 import com.example.ui.theme.PrimaryTeal
 
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.platform.LocalUriHandler
+
 @Composable
 fun OnboardingScreen(
-    onNavigateToHome: () -> Unit,
+    onNavigateToHome: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var visible by remember { mutableStateOf(false) }
+    var tokenText by remember { mutableStateOf("") }
+    val uriHandler = LocalUriHandler.current
+
     LaunchedEffect(Unit) {
         visible = true
     }
@@ -122,18 +128,39 @@ fun OnboardingScreen(
                         title = "2. Simulados com Questões Reais",
                         description = "Coletamos e simulamos questões baseadas em provas anteriores do mesmo concurso para você treinar com precisão."
                     )
-
-                    OnboardingFeatureCard(
-                        icon = Icons.Default.School,
-                        title = "3. Explicações Item a Item",
-                        description = "Não fique apenas sabendo se errou ou acertou. Veja uma explicação detalhada e comentada para cada alternativa de cada questão."
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    // Token Input
+                    OutlinedTextField(
+                        value = tokenText,
+                        onValueChange = { tokenText = it },
+                        label = { Text("Gemini API Key") },
+                        placeholder = { Text("Cole sua chave de API aqui") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
                     )
+                    
+                    TextButton(onClick = { uriHandler.openUri("https://aistudio.google.com/app/apikey") }) {
+                        Text(
+                            text = "Não tem uma chave? Obtenha no Google AI Studio",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
             }
 
             // Footer Button
             Button(
-                onClick = onNavigateToHome,
+                onClick = {
+                    if (tokenText.isNotBlank()) {
+                        onNavigateToHome(tokenText)
+                    }
+                },
+                enabled = tokenText.isNotBlank(),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp)

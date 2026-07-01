@@ -41,6 +41,8 @@ fun HomeScreen(
     onNavigateToExamReview: (Long) -> Unit,
     onDeletePlan: (StudyPlan) -> Unit,
     onDeleteExam: (MockExam) -> Unit,
+    currentToken: String?,
+    onSaveToken: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Scaffold(
@@ -63,6 +65,8 @@ fun HomeScreen(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
+        var showSettingsDialog by remember { mutableStateOf(false) }
+
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -73,7 +77,10 @@ fun HomeScreen(
         ) {
             // Header Card
             item {
-                HomeHeaderCard(streak = streak)
+                HomeHeaderCard(
+                    streak = streak,
+                    onSettingsClick = { showSettingsDialog = true }
+                )
             }
 
             // Stats row
@@ -146,11 +153,45 @@ fun HomeScreen(
                 }
             }
         }
+        
+        if (showSettingsDialog) {
+            var tokenInput by remember { mutableStateOf(currentToken ?: "") }
+            AlertDialog(
+                onDismissRequest = { showSettingsDialog = false },
+                title = { Text("Configurações") },
+                text = {
+                    Column {
+                        Text(
+                            text = "Atualize sua chave da API do Gemini para continuar gerando planos e simulados.",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        OutlinedTextField(
+                            value = tokenInput,
+                            onValueChange = { tokenInput = it },
+                            label = { Text("Gemini API Key") },
+                            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        onSaveToken(tokenInput)
+                        showSettingsDialog = false
+                    }) { Text("Salvar") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showSettingsDialog = false }) { Text("Cancelar") }
+                }
+            )
+        }
     }
 }
 
 @Composable
-fun HomeHeaderCard(streak: Int) {
+fun HomeHeaderCard(streak: Int, onSettingsClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
@@ -188,27 +229,46 @@ fun HomeHeaderCard(streak: Int) {
                 }
 
                 // Streak pill with Geometric background
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Whatshot,
-                        contentDescription = "Foco Ativo",
-                        tint = LightAccent,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Text(
-                        text = "$streak Dias",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Whatshot,
+                            contentDescription = "Foco Ativo",
+                            tint = LightAccent,
+                            modifier = Modifier.size(20.dp)
                         )
-                    )
+                        Text(
+                            text = "$streak Dias",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.width(8.dp))
+                    
+                    IconButton(
+                        onClick = onSettingsClick,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.3f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Configurações",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
 
