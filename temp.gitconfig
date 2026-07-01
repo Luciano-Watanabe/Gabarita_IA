@@ -1,2 +1,5 @@
 [safe]
 	directory = *
+[user]
+	name = Antigravity
+	email = antigravity@example.com

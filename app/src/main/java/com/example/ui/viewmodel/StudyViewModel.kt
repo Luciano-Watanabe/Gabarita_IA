@@ -538,8 +538,9 @@ class StudyViewModel(
                         
                         $editalPart
                         
-                        Crie um plano de estudos altamente otimizado focado especificamente na vaga/cargo '$cargo' para o concurso '$targetExam' (Data prevista da prova: $examDate).
-                        Com base no conteúdo programático oficial contido no edital acima para este cargo específico '$cargo', elabore um roteiro de estudos prático com 6 a 8 tópicos prioritários. Se o edital não contiver o conteúdo para este cargo, simule de forma extremamente realista com base nas matérias mais cobradas pela banca para este cargo específico '$cargo'.
+                        Crie um plano de estudos altamente otimizado focado estritamente na vaga/cargo '$cargo' para o concurso '$targetExam' (Data prevista da prova: $examDate).
+                        ATENÇÃO MÁXIMA: É obrigatório que você filtre o edital em anexo e extraia APENAS as disciplinas, matérias e assuntos correspondentes à vaga específica de '$cargo'. Você DEVE IGNORAR COMPLETAMENTE as matérias listadas para outros cargos ou conhecimentos que não são cobrados para a vaga de '$cargo'.
+                        Com base exclusivamente no conteúdo programático oficial para o cargo '$cargo', elabore um roteiro de estudos prático com 6 a 8 tópicos prioritários. Se o edital não contiver o conteúdo para este cargo, simule com base nas matérias mais cobradas pela banca para a vaga '$cargo'.
                         O plano deve conter um título estratégico curto, uma descrição focada no perfil do cargo e uma lista de 6 a 8 tópicos prioritários.
                         Para cada tópico inclua:
                         - O nome do tópico (ex: "Noções de Direito Constitucional" ou "Informática - Banco de Dados").
