@@ -17,7 +17,14 @@ data class Content(
 
 @JsonClass(generateAdapter = true)
 data class Part(
-    @Json(name = "text") val text: String? = null
+    @Json(name = "text") val text: String? = null,
+    @Json(name = "fileData") val fileData: FileData? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class FileData(
+    @Json(name = "fileUri") val fileUri: String,
+    @Json(name = "mimeType") val mimeType: String
 )
 
 @JsonClass(generateAdapter = true)
@@ -34,4 +41,16 @@ data class GeminiResponse(
 @JsonClass(generateAdapter = true)
 data class Candidate(
     @Json(name = "content") val content: Content?
+)
+
+@JsonClass(generateAdapter = true)
+data class UploadResponse(
+    @Json(name = "file") val file: UploadedFile
+)
+
+@JsonClass(generateAdapter = true)
+data class UploadedFile(
+    @Json(name = "name") val name: String,
+    @Json(name = "uri") val uri: String,
+    @Json(name = "mimeType") val mimeType: String
 )

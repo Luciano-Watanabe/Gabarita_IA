@@ -14,7 +14,9 @@
 
 - **Linguagem:** Kotlin
 - **UI & Navegação:** Jetpack Compose / Navigation Compose
-- **Integração com IA:** Retrofit (conecta com a API do Gemini `GEMINI_API_KEY`)
+- **Injeção de Dependência:** Koin
+- **Integração com IA:** Retrofit (conecta com a API do Gemini via REST)
+- **Extração de Arquivos:** Gemini File API (upload nativo de PDFs para o modelo multimodal)
 - **Persistência de Dados:** Room Database
 - **CI/CD:** GitHub Actions (pipeline para build automático do APK)
 

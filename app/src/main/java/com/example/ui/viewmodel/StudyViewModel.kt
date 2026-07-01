@@ -13,9 +13,10 @@ import com.example.data.api.RetrofitClient
 import com.example.data.database.*
 import com.example.data.repository.StudyRepository
 import com.example.data.api.GenerationConfig
-import com.tom_roush.pdfbox.pdmodel.PDDocument
-import com.tom_roush.pdfbox.text.PDFTextStripper
-import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.example.data.api.FileData
+import com.example.data.api.GeminiApiService
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -27,26 +28,12 @@ import org.json.JSONObject
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-class StudyViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val repository: StudyRepository
-    val tokenManager: TokenManager
-
-    init {
-        val database = AppDatabase.getDatabase(application)
-        repository = StudyRepository(database.studyDao())
-        tokenManager = TokenManager(application)
-        
-        // Inicializa o PDFBoxResourceLoader em segundo plano para aquecer a biblioteca de fontes
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                PDFBoxResourceLoader.init(application)
-                Log.d("StudyViewModel", "Successfully pre-initialized PDFBoxResourceLoader asynchronously in init")
-            } catch (e: Throwable) {
-                Log.e("StudyViewModel", "Failed to pre-initialize PDFBoxResourceLoader", e)
-            }
-        }
-    }
+class StudyViewModel(
+    application: Application,
+    private val repository: StudyRepository,
+    val tokenManager: TokenManager,
+    private val apiService: GeminiApiService
+) : AndroidViewModel(application) {
 
     // --- State Streams ---
     val studyPlans: StateFlow<List<StudyPlan>> = repository.allStudyPlans
@@ -84,6 +71,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _extractedSyllabusText = MutableStateFlow("")
     val extractedSyllabusText: StateFlow<String> = _extractedSyllabusText.asStateFlow()
+
+    private val _extractedFileData = MutableStateFlow<FileData?>(null)
+    val extractedFileData: StateFlow<FileData?> = _extractedFileData.asStateFlow()
 
     fun clearSuggestedCargos() {
         _suggestedCargos.value = emptyList()
@@ -271,7 +261,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun generateContentWithRetry(
         apiKey: String,
         initialSnippetSize: Int = 25000,
-        buildPrompt: (Int) -> String
+        buildPrompt: (Int) -> List<Part>
     ): com.example.data.api.GeminiResponse = withContext(Dispatchers.IO) {
         var currentSnippetSize = initialSnippetSize
         var attempt = 1
@@ -280,12 +270,12 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         while (attempt <= 4) {
             try {
                 Log.d("StudyViewModel", "Tentativa $attempt: chamando Gemini com tamanho de recorte = $currentSnippetSize...")
-                val prompt = buildPrompt(currentSnippetSize)
+                val parts = buildPrompt(currentSnippetSize)
                 
-                val response = RetrofitClient.service.generateContent(
+                val response = apiService.generateContent(
                     apiKey = apiKey,
                     request = GeminiRequest(
-                        contents = listOf(Content(parts = listOf(Part(text = prompt)))),
+                        contents = listOf(Content(parts = parts)),
                         generationConfig = GenerationConfig(responseMimeType = "application/json")
                     )
                 )
@@ -316,14 +306,32 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         throw lastException ?: IllegalStateException("Erro ao chamar o Gemini após várias tentativas.")
     }
 
-    private suspend fun extractSyllabusText(
+    private suspend fun uploadPdfToGemini(pdfUri: Uri, apiKey: String): FileData = withContext(Dispatchers.IO) {
+        val context: Application = getApplication()
+        val inputStream = context.contentResolver.openInputStream(pdfUri)
+            ?: throw IllegalStateException("Não foi possível abrir o arquivo PDF selecionado")
+        
+        val bytes = inputStream.use { it.readBytes() }
+        val requestBody = bytes.toRequestBody("application/pdf".toMediaType())
+        
+        val response = apiService.uploadFile(
+            apiKey = apiKey,
+            contentLength = bytes.size.toString(),
+            contentType = "application/pdf",
+            content = requestBody
+        )
+        FileData(fileUri = response.file.uri, mimeType = "application/pdf")
+    }
+
+    private suspend fun processSource(
         sourceInput: String,
         sourceType: String,
-        pdfUri: Uri?
-    ): String = withContext(Dispatchers.IO) {
+        pdfUri: Uri?,
+        apiKey: String
+    ): Pair<String, FileData?> = withContext(Dispatchers.IO) {
         try {
             when (sourceType) {
-                "TEXT" -> sourceInput
+                "TEXT" -> Pair(sourceInput, null)
                 "LINK" -> {
                     var url = sourceInput.trim()
                     if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) {
@@ -334,8 +342,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                     val okHttpClient = getUnsafeOkHttpClient()
                     val request = Request.Builder()
                         .url(url)
-                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                        .header("Accept", "application/pdf,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                         .build()
                         
                     val response = okHttpClient.newCall(request).execute()
@@ -345,69 +352,36 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                     val body = response.body ?: throw IllegalStateException("Conteúdo do link vazio")
                     val bytes = body.bytes()
                     
-                    // PDF Magic bytes check (%PDF)
-                    val isPdfMagic = bytes.size >= 4 && 
-                                     bytes[0] == '%'.code.toByte() && 
-                                     bytes[1] == 'P'.code.toByte() && 
-                                     bytes[2] == 'D'.code.toByte() && 
-                                     bytes[3] == 'F'.code.toByte()
-                                     
-                    val isPdf = isPdfMagic || 
-                                 url.contains(".pdf", ignoreCase = true) || 
-                                 response.header("Content-Type")?.lowercase()?.contains("pdf") == true
+                    val isPdfMagic = bytes.size >= 4 && bytes[0] == '%'.code.toByte() && bytes[1] == 'P'.code.toByte() && bytes[2] == 'D'.code.toByte() && bytes[3] == 'F'.code.toByte()
+                    val isPdf = isPdfMagic || url.contains(".pdf", ignoreCase = true) || response.header("Content-Type")?.lowercase()?.contains("pdf") == true
                     
                     if (isPdf) {
-                        Log.d("StudyViewModel", "Detected PDF from link (isPdfMagic=$isPdfMagic). Parsing with PDFBox...")
-                        extractTextFromPdfBytes(bytes)
+                        Log.d("StudyViewModel", "Detected PDF from link. Uploading to Gemini API...")
+                        val requestBody = bytes.toRequestBody("application/pdf".toMediaType())
+                        val uploadResp = apiService.uploadFile(
+                            apiKey = apiKey,
+                            contentLength = bytes.size.toString(),
+                            contentType = "application/pdf",
+                            content = requestBody
+                        )
+                        Pair("", FileData(uploadResp.file.uri, "application/pdf"))
                     } else {
-                        Log.d("StudyViewModel", "Detected web page HTML. Cleaning tags with safe linear parser...")
+                        Log.d("StudyViewModel", "Detected web page HTML. Cleaning tags...")
                         val html = String(bytes, Charsets.UTF_8)
-                        stripHtml(html)
+                        Pair(stripHtml(html), null)
                     }
                 }
                 "PDF" -> {
                     if (pdfUri == null) throw IllegalStateException("Arquivo PDF não foi selecionado")
-                    Log.d("StudyViewModel", "Reading local PDF URI: $pdfUri")
-                    val context: Application = getApplication()
-                    val inputStream = context.contentResolver.openInputStream(pdfUri)
-                        ?: throw IllegalStateException("Não foi possível abrir o arquivo PDF selecionado")
-                    val bytes = inputStream.use { it.readBytes() }
-                    extractTextFromPdfBytes(bytes)
+                    Log.d("StudyViewModel", "Uploading local PDF URI to Gemini API: $pdfUri")
+                    val fileData = uploadPdfToGemini(pdfUri, apiKey)
+                    Pair("", fileData)
                 }
-                else -> sourceInput
+                else -> Pair(sourceInput, null)
             }
         } catch (e: Throwable) {
-            Log.e("StudyViewModel", "Erro ao extrair conteúdo programático", e)
+            Log.e("StudyViewModel", "Erro ao extrair conteúdo", e)
             throw e
-        }
-    }
-
-    private fun extractTextFromPdfBytes(bytes: ByteArray, maxPages: Int = 30): String {
-        try {
-            val app: Application = getApplication()
-            PDFBoxResourceLoader.init(app)
-            Log.d("StudyViewModel", "Successfully initialized PDFBoxResourceLoader!")
-        } catch (e: Throwable) {
-            Log.e("StudyViewModel", "Failed to initialize PDFBoxResourceLoader", e)
-        }
-        return try {
-            PDDocument.load(bytes).use { document ->
-                val totalPages = document.numberOfPages
-                val stripper = PDFTextStripper()
-                stripper.startPage = 1
-                stripper.endPage = maxPages.coerceAtMost(totalPages)
-                val text = stripper.getText(document)
-                Log.d("StudyViewModel", "Successfully extracted ${text.length} chars from PDF ($totalPages pages total)")
-                text
-            }
-        } catch (e: Throwable) {
-            Log.e("StudyViewModel", "Falha ao analisar estrutura do PDF com PDFBox", e)
-            val msg = if (e is OutOfMemoryError) {
-                "O arquivo PDF é muito grande para ser processado no celular. Tente copiar e colar o texto dele diretamente."
-            } else {
-                "Falha ao analisar a estrutura do arquivo PDF. Certifique-se de que é um documento válido."
-            }
-            throw IllegalStateException(msg)
         }
     }
 
@@ -428,23 +402,23 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                     throw IllegalStateException("API Key do Gemini não configurada! Por favor, insira-a na tela inicial ou nas configurações.")
                 }
 
-                // Extract text programmatically from the PDF, Webpage, or Text
-                val extractedText = extractSyllabusText(sourceInput, sourceType, pdfUri)
+                // Extract text programmatically or Upload PDF to Gemini
+                val (extractedText, fileData) = processSource(sourceInput, sourceType, pdfUri, apiKey)
                 _extractedSyllabusText.value = extractedText
+                _extractedFileData.value = fileData
 
                 val response = generateContentWithRetry(
                     apiKey = apiKey,
                     initialSnippetSize = 25000,
                     buildPrompt = { size ->
-                        val textSnippet = if (extractedText.isNotEmpty()) {
-                            if (size > 0) {
-                                if (extractedText.length > size) extractedText.take(size) else extractedText
-                            } else {
-                                ""
-                            }
-                        } else {
-                            ""
+                        val parts = mutableListOf<Part>()
+                        if (fileData != null) {
+                            parts.add(Part(fileData = fileData))
                         }
+                        
+                        val textSnippet = if (extractedText.isNotEmpty()) {
+                            if (size > 0 && extractedText.length > size) extractedText.take(size) else extractedText
+                        } else ""
                         
                         val editalPart = if (textSnippet.isNotEmpty()) {
                             """
@@ -452,11 +426,13 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                             $textSnippet
                             --- FIM DOS DADOS DO EDITAL ---
                             """.trimIndent()
+                        } else if (fileData != null) {
+                            "O arquivo do edital foi enviado em anexo. Baseie-se fortemente no PDF anexado."
                         } else {
                             "Não há dados específicos de edital disponíveis (use seu conhecimento geral)."
                         }
 
-                        """
+                        val textPrompt = """
                         Você é um especialista em concursos públicos brasileiros. Com base no concurso '$targetExam' e nos seguintes dados reais extraídos do edital:
                         
                         $editalPart
@@ -471,6 +447,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                           "Analista Judiciário - Tecnologia da Informação"
                         ]
                         """.trimIndent()
+                        
+                        parts.add(Part(text = textPrompt))
+                        parts
                     }
                 )
 
@@ -525,24 +504,22 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 val fullSyllabus = _extractedSyllabusText.value
+                val fileData = _extractedFileData.value
 
                 val response = generateContentWithRetry(
                     apiKey = apiKey,
                     initialSnippetSize = 25000,
                     buildPrompt = { size ->
-                        val textSnippet = if (fullSyllabus.isNotEmpty()) {
-                            if (size > 0) {
-                                if (fullSyllabus.length > size) fullSyllabus.take(size) else fullSyllabus
-                            } else {
-                                ""
-                            }
-                        } else {
-                            if (size > 0 && sourceInput.isNotEmpty()) {
-                                if (sourceInput.length > size) sourceInput.take(size) else sourceInput
-                            } else {
-                                ""
-                            }
+                        val parts = mutableListOf<Part>()
+                        if (fileData != null) {
+                            parts.add(Part(fileData = fileData))
                         }
+                        
+                        val textSnippet = if (fullSyllabus.isNotEmpty()) {
+                            if (size > 0 && fullSyllabus.length > size) fullSyllabus.take(size) else fullSyllabus
+                        } else if (size > 0 && sourceInput.isNotEmpty()) {
+                            if (sourceInput.length > size) sourceInput.take(size) else sourceInput
+                        } else ""
                         
                         val editalPart = if (textSnippet.isNotEmpty()) {
                             """
@@ -550,11 +527,13 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                             $textSnippet
                             --- FIM DO EDITAL ---
                             """.trimIndent()
+                        } else if (fileData != null) {
+                            "O arquivo do edital foi enviado em anexo. Baseie-se fortemente no PDF anexado."
                         } else {
                             "Não há dados de edital detalhado disponíveis (use seu conhecimento para o cargo)."
                         }
 
-                        """
+                        val textPrompt = """
                         Você é um especialista em concursos públicos no Brasil. Com base no concurso '$targetExam' para a vaga/cargo específico de '$cargo', e considerando as informações disponíveis:
                         
                         $editalPart
@@ -584,6 +563,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                           ]
                         }
                         """.trimIndent()
+                        
+                        parts.add(Part(text = textPrompt))
+                        parts
                     }
                 )
 
@@ -626,19 +608,20 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                     throw IllegalStateException("API Key do Gemini não configurada! Por favor, insira-a na tela inicial ou nas configurações.")
                 }
 
+                val fileData = _extractedFileData.value
+
                 val response = generateContentWithRetry(
                     apiKey = apiKey,
                     initialSnippetSize = 25000,
                     buildPrompt = { size ->
-                        val textSnippet = if (input.isNotEmpty()) {
-                            if (size > 0) {
-                                if (input.length > size) input.take(size) else input
-                            } else {
-                                ""
-                            }
-                        } else {
-                            ""
+                        val parts = mutableListOf<Part>()
+                        if (fileData != null) {
+                            parts.add(Part(fileData = fileData))
                         }
+                        
+                        val textSnippet = if (input.isNotEmpty()) {
+                            if (size > 0 && input.length > size) input.take(size) else input
+                        } else ""
                         
                         val editalPart = if (textSnippet.isNotEmpty()) {
                             """
@@ -646,11 +629,13 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                             $textSnippet
                             --- FIM DOS DADOS ---
                             """.trimIndent()
+                        } else if (fileData != null) {
+                            "O arquivo base foi enviado em anexo. Baseie-se fortemente no PDF anexado."
                         } else {
                             "Não há dados específicos detalhados (use seu conhecimento geral de concursos)."
                         }
 
-                        """
+                        val textPrompt = """
                         Você é um especialista em concursos públicos no Brasil. Com base no seguinte edital, conteúdo programático ou link com dados de prova fornecido pelo usuário:
                         
                         $editalPart
@@ -679,6 +664,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                           ]
                         }
                         """.trimIndent()
+                        
+                        parts.add(Part(text = textPrompt))
+                        parts
                     }
                 )
 
@@ -731,7 +719,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                     apiKey = apiKey,
                     initialSnippetSize = 5000,
                     buildPrompt = {
-                        """
+                        val textPrompt = """
                         Você é um experiente elaborador de provas de concursos públicos brasileiros.
                         Crie um simulado de aprendizado focado no concurso '${plan.targetExam}' contendo 5 questões inéditas ou adaptadas de provas reais de anos anteriores (de bancas como CESPE/Cebraspe, FGV, FCC, CESGRANRIO, etc.), totalmente baseadas nos seguintes tópicos de estudos previstos para a prova:
                         $topicsSummary
@@ -753,6 +741,8 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                           }
                         ]
                         """.trimIndent()
+                        
+                        listOf(Part(text = textPrompt))
                     }
                 )
 
