@@ -24,7 +24,7 @@ jobs:
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v3
       with:
-        gradle-version: '8.7' # Uses a specific Gradle version since gradlew might be missing
+        gradle-version: '9.3.1' # Uses a specific Gradle version since gradlew might be missing
 
     - name: Build Debug APK
       run: gradle assembleDebug
