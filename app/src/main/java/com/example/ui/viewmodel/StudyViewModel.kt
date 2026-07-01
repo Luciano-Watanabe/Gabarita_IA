@@ -12,6 +12,7 @@ import com.example.data.api.Part
 import com.example.data.api.RetrofitClient
 import com.example.data.database.*
 import com.example.data.repository.StudyRepository
+import com.example.data.api.GenerationConfig
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
@@ -23,6 +24,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -87,14 +90,41 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Streaks & Stats
-    val studyStreak: StateFlow<Int> = studyPlans.map { plans ->
-        // Just a simple dynamic gamification metric based on plans/completed topics
-        if (plans.isEmpty()) 0 else {
-            var completedCount = 0
-            plans.forEach { _ -> completedCount++ }
-            completedCount * 3 + 1
+    private val allDailyActivities: StateFlow<List<DailyActivity>> = repository.allDailyActivities
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val studyStreak: StateFlow<Int> = allDailyActivities.map { activities ->
+        if (activities.isEmpty()) return@map 0
+        
+        var streak = 0
+        var currentDate = LocalDate.now()
+        
+        // Convert dates to a set for fast lookup
+        val activityDates = activities.map { LocalDate.parse(it.date) }.toSet()
+        
+        // If today has no activity, we can check if yesterday had (so they haven't lost the streak yet today)
+        if (!activityDates.contains(currentDate)) {
+            if (activityDates.contains(currentDate.minusDays(1))) {
+                currentDate = currentDate.minusDays(1)
+            } else {
+                return@map 0
+            }
         }
+        
+        while (activityDates.contains(currentDate)) {
+            streak++
+            currentDate = currentDate.minusDays(1)
+        }
+        
+        streak
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    private fun recordTodayActivity() {
+        viewModelScope.launch {
+            val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+            repository.recordDailyActivity(today)
+        }
+    }
 
     // Selects a Study Plan and collects its topics in real-time
     fun selectStudyPlan(planId: Long) {
@@ -135,6 +165,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleTopicCompletion(topicId: Long, completed: Boolean) {
         viewModelScope.launch {
             repository.updateTopicCompletion(topicId, completed)
+            if (completed) {
+                recordTodayActivity()
+            }
             // Trigger refresh if we have an active selected plan
             val plan = _selectedPlan.value
             if (plan != null) {
@@ -165,6 +198,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             _isLoading.value = true
             val questions = _currentQuestions.value
             repository.finishMockExam(examId, questions)
+            recordTodayActivity()
             // Refresh exam model
             val exam = repository.getMockExamById(examId)
             _selectedExam.value = exam
@@ -251,7 +285,8 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 val response = RetrofitClient.service.generateContent(
                     apiKey = apiKey,
                     request = GeminiRequest(
-                        contents = listOf(Content(parts = listOf(Part(text = prompt))))
+                        contents = listOf(Content(parts = listOf(Part(text = prompt)))),
+                        generationConfig = GenerationConfig(responseMimeType = "application/json")
                     )
                 )
                 
@@ -429,7 +464,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                         Identifique as vagas, cargos ou áreas de atuação oficialmente disponíveis neste concurso listadas no edital acima.
                         Selecione de 4 a 8 cargos/vagas principais ou mais relevantes listados nesses dados. Se o texto acima estiver muito incompleto ou for genérico, use o conhecimento prévio de provas reais desse concurso para complementar com os cargos reais.
                         
-                        Retorne ESTREITAMENTE um array JSON contendo esses cargos reais encontrados, ordenados por relevância. Não inclua blocos markdown (NÃO inclua ```json ou similares), apenas a estrutura do array JSON válido.
+                        Retorne ESTREITAMENTE um array JSON contendo esses cargos reais encontrados, ordenados por relevância. Não inclua blocos markdown, apenas a estrutura do array JSON válido.
                         Exemplo de retorno esperado:
                         [
                           "Técnico Judiciário - Área Administrativa",
@@ -629,7 +664,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                         - Tempo de estudo recomendado em horas (ex: 12).
                         - Dicas exclusivas de estudo ou mnemônicos rápidos de memorização para o tema.
 
-                        O retorno deve ser ESTREITAMENTE em formato JSON válido, sem qualquer bloco markdown (NÃO inclua ```json ou similares), obedecendo fielmente esta estrutura:
+                        O retorno deve ser ESTREITAMENTE em formato JSON válido, sem qualquer bloco markdown, obedecendo fielmente esta estrutura:
                         {
                           "title": "Título estratégico do plano de estudos",
                           "description": "Uma visão geral focada nos pontos cruciais para passar na prova",
@@ -704,7 +739,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                         Cada questão DEVE ter 5 alternativas (A, B, C, D, E) com apenas uma correta.
                         Ao final de cada questão, inclua uma EXPLICACÃO DETALHADA e comentada de por que a resposta é a correta e por que as outras alternativas estão incorretas, facilitando a memorização e o aprendizado completo.
 
-                        O retorno deve ser ESTREITAMENTE em formato JSON válido, sem qualquer bloco markdown (NÃO inclua ```json ou similares), obedecendo fielmente esta estrutura de array JSON:
+                        O retorno deve ser ESTREITAMENTE em formato JSON válido, sem qualquer bloco markdown, obedecendo fielmente esta estrutura de array JSON:
                         [
                           {
                             "text": "Enunciado completo da questão, citando ano, banca e cargo se possível.",
@@ -741,16 +776,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- Helpers to Clean and Parse ---
     private fun cleanJsonResponse(raw: String): String {
-        var clean = raw.trim()
-        if (clean.startsWith("```json")) {
-            clean = clean.removePrefix("```json")
-        } else if (clean.startsWith("```")) {
-            clean = clean.removePrefix("```")
-        }
-        if (clean.endsWith("```")) {
-            clean = clean.removeSuffix("```")
-        }
-        return clean.trim()
+        return raw.trim() // Gemini will now return pure JSON due to responseMimeType
     }
 
     private suspend fun parseAndSaveStudyPlan(jsonStr: String, targetExam: String, examDate: String): Long {

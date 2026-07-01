@@ -56,4 +56,16 @@ class StudyRepository(private val studyDao: StudyDao) {
         val score = questions.count { it.userAnswer == it.correctOption }
         studyDao.updateMockExamResult(examId, score, isCompleted = true)
     }
+
+    // --- Gamification ---
+    val allDailyActivities: Flow<List<DailyActivity>> = studyDao.getAllDailyActivities()
+
+    suspend fun recordDailyActivity(date: String) {
+        val existing = studyDao.getDailyActivity(date)
+        if (existing != null) {
+            studyDao.insertDailyActivity(existing.copy(completedItems = existing.completedItems + 1))
+        } else {
+            studyDao.insertDailyActivity(DailyActivity(date, 1))
+        }
+    }
 }

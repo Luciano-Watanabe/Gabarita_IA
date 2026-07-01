@@ -228,29 +228,43 @@ fun HomeHeaderCard(streak: Int, onSettingsClick: () -> Unit) {
                     )
                 }
 
+                val streakColor = if (streak > 0) LightAccent else MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f)
+                val streakBg = if (streak > 0) LightAccent.copy(alpha = 0.2f) else MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.1f)
+
                 // Streak pill with Geometric background
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-                            .padding(horizontal = 14.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Whatshot,
-                            contentDescription = "Foco Ativo",
-                            tint = LightAccent,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = "$streak Dias",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                    Column(horizontalAlignment = Alignment.End) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(streakBg)
+                                .padding(horizontal = 14.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (streak > 0) Icons.Default.LocalFireDepartment else Icons.Default.Whatshot,
+                                contentDescription = "Foco Ativo",
+                                tint = streakColor,
+                                modifier = Modifier.size(20.dp)
                             )
-                        )
+                            Text(
+                                text = "$streak Dias",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (streak > 0) streakColor else MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            )
+                        }
+                        
+                        if (streak >= 3) {
+                            Text(
+                                text = "Você está pegando fogo! \uD83D\uDD25",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = LightAccent,
+                                modifier = Modifier.padding(top = 4.dp, end = 4.dp)
+                            )
+                        }
                     }
                     
                     Spacer(modifier = Modifier.width(8.dp))

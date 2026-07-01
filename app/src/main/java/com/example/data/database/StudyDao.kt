@@ -56,4 +56,14 @@ interface StudyDao {
 
     @Query("UPDATE questions SET userAnswer = :userAnswer WHERE id = :questionId")
     suspend fun updateQuestionAnswer(questionId: Long, userAnswer: String?)
+
+    // --- Gamification ---
+    @Query("SELECT * FROM daily_activity ORDER BY date DESC")
+    fun getAllDailyActivities(): Flow<List<DailyActivity>>
+
+    @Query("SELECT * FROM daily_activity WHERE date = :date")
+    suspend fun getDailyActivity(date: String): DailyActivity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertDailyActivity(activity: DailyActivity)
 }
